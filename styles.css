@@ -1,8 +1,159 @@
-/*
+/* Hugo images side panel */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.hugo-images-view {
+	padding: 0.75rem;
+}
 
-If your plugin does not need CSS, delete this file.
+.hugo-images-empty {
+	color: var(--text-muted);
+	padding: 1rem;
+	text-align: center;
+}
 
-*/
+.hugo-images-error {
+	color: var(--text-error);
+	background-color: var(--background-modifier-error);
+	padding: 0.75rem;
+	border-radius: 4px;
+	white-space: pre-wrap;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}
+
+.hugo-images-header {
+	font-weight: var(--font-semibold);
+	margin-bottom: 0.5rem;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.hugo-images-section-header {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-top: 1rem;
+	margin-bottom: 0.5rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.hugo-image-card {
+	display: flex;
+	gap: 0.75rem;
+	padding: 0.75rem;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background-color: var(--background-secondary);
+	margin-bottom: 0.5rem;
+}
+
+.hugo-image-card.is-cover {
+	border-color: var(--interactive-accent);
+	border-width: 2px;
+}
+
+.hugo-image-card.is-unreferenced {
+	background-color: var(--background-primary-alt);
+}
+
+.hugo-image-thumb {
+	width: 96px;
+	height: 96px;
+	flex-shrink: 0;
+	border-radius: 4px;
+	background-color: var(--background-primary);
+	overflow: hidden;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.hugo-image-thumb img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.hugo-image-thumb-empty {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	padding: 0.5rem;
+	text-align: center;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	word-break: break-all;
+}
+
+.hugo-image-fields {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+}
+
+.hugo-image-src {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	word-break: break-all;
+}
+
+.hugo-image-source-badge {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.hugo-image-input-row {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+
+.hugo-image-input-label {
+	flex-shrink: 0;
+	width: 1rem;
+	text-align: center;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	color: var(--text-faint);
+	cursor: default;
+	user-select: none;
+}
+
+.hugo-image-input {
+	flex: 1;
+	min-width: 0;
+	font-size: var(--font-ui-small);
+	font-family: inherit;
+	resize: none;
+	overflow: hidden;
+	transition: rows 0.15s ease;
+	line-height: 1.4;
+}
+
+.hugo-image-cover-row {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: var(--font-ui-small);
+}
+
+.hugo-image-cover-row input[disabled] + label {
+	color: var(--text-faint);
+}
+
+.hugo-image-actions {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.hugo-image-insert {
+	font-size: var(--font-ui-small);
+}
+
+.hugo-image-note {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	font-style: italic;
+}
