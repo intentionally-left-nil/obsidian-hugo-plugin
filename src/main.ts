@@ -1,5 +1,6 @@
 import { Plugin, WorkspaceLeaf } from 'obsidian';
 import { HugoImagesView, VIEW_TYPE_HUGO_IMAGES } from './view/images-view';
+import { registerFigurePostProcessor, createFigureEditorExtension } from './view/figure-renderer';
 
 export default class HugoImagesPlugin extends Plugin {
 	async onload() {
@@ -7,6 +8,9 @@ export default class HugoImagesPlugin extends Plugin {
 			VIEW_TYPE_HUGO_IMAGES,
 			(leaf) => new HugoImagesView(leaf, this.app),
 		);
+
+		this.registerEditorExtension(createFigureEditorExtension(this.app));
+		registerFigurePostProcessor(this.app, this);
 
 		this.addRibbonIcon('image', 'Open hugo images panel', () => {
 			void this.activateView();
