@@ -1,11 +1,14 @@
 import { App, MarkdownPostProcessorContext, Plugin, TFile, editorInfoField, editorLivePreviewField } from 'obsidian';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
-import { RangeSetBuilder } from '@codemirror/state';
+import { RangeSetBuilder, StateField, Transaction } from '@codemirror/state';
 import { parse, findShortcodes } from '../parser/shortcodes';
 import type { ShortcodeNode } from '../types';
 
-// Fast-path guard: only invoke the parser when a figure shortcode is plausibly present.
+// Fast-path guards: only invoke the parser when a shortcode is plausibly present.
 const FIGURE_RE = /\{\{<\s*figure[\s/>]/;
+const GALLERY_OPEN_RE = /\{\{<\s*gallery[\s>]/;
+const GALLERY_RE = /\{\{<\s*gallery[\s/>]/;
+const SHORTCODE_RE = /\{\{<\s*(?:figure|gallery)[\s/>]/;
 
 interface FigureAttrs {
 	src: string;
@@ -60,6 +63,25 @@ function resolveImageSrc(app: App, src: string, sourcePath: string): string {
 	return src;
 }
 
+/**
+ * Return the number of columns for a gallery node.
+ * Defaults to 3 (per project convention). Clamped to 1–4.
+ */
+function getGalleryCols(node: ShortcodeNode): number {
+	const raw = node.args.named.get('cols')?.value;
+	if (!raw) return 3;
+	const n = parseInt(raw, 10);
+	if (!Number.isFinite(n)) return 3;
+	return Math.max(1, Math.min(4, n));
+}
+
+/* ---------------------------------------------------------------------------
+ * DOM construction helpers
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Build a standalone `<figure class="hugo-figure">` element.
+ */
 function buildFigureElement(app: App, attrs: FigureAttrs, sourcePath: string): HTMLElement {
 	const figure = document.createElement('figure');
 	figure.className = 'hugo-figure';
@@ -80,8 +102,53 @@ function buildFigureElement(app: App, attrs: FigureAttrs, sourcePath: string): H
 	return figure;
 }
 
+/**
+ * Build a `<figure class="hugo-gallery-item">` for use inside a gallery div.
+ */
+function buildGalleryItemElement(attrs: FigureAttrs, resolvedSrc: string): HTMLElement {
+	const figure = document.createElement('figure');
+	figure.className = 'hugo-gallery-item';
+
+	const img = document.createElement('img');
+	img.className = 'hugo-gallery-item-img';
+	img.src = resolvedSrc;
+	img.alt = attrs.alt;
+	figure.appendChild(img);
+
+	if (attrs.caption) {
+		const cap = document.createElement('figcaption');
+		cap.className = 'hugo-gallery-item-caption';
+		cap.textContent = attrs.caption;
+		figure.appendChild(cap);
+	}
+
+	return figure;
+}
+
+/**
+ * Build a `<div class="hugo-gallery hugo-gallery-cols-N">` containing one
+ * gallery item per `{{< figure >}}` child of the given gallery shortcode node.
+ */
+function buildGalleryElement(app: App, galleryNode: ShortcodeNode, sourcePath: string): HTMLElement {
+	const cols = getGalleryCols(galleryNode);
+	const div = document.createElement('div');
+	div.className = `hugo-gallery hugo-gallery-cols-${cols}`;
+
+	const childFigures = galleryNode.children.filter(
+		(c): c is ShortcodeNode => c.kind === 'shortcode' && c.name === 'figure',
+	);
+
+	for (const child of childFigures) {
+		const attrs = attrsFromNode(child, app, sourcePath);
+		const resolvedSrc = resolveImageSrc(app, attrs.src, sourcePath);
+		div.appendChild(buildGalleryItemElement(attrs, resolvedSrc));
+	}
+
+	return div;
+}
+
 /* ---------------------------------------------------------------------------
- * CodeMirror widget — live preview mode
+ * CodeMirror widgets — live preview mode
  * ------------------------------------------------------------------------- */
 
 class FigureWidget extends WidgetType {
@@ -121,67 +188,281 @@ class FigureWidget extends WidgetType {
 	}
 }
 
-function buildDecorations(view: EditorView, app: App): DecorationSet {
+interface GalleryItem {
+	resolvedSrc: string;
+	alt: string;
+	caption: string;
+}
+
+class GalleryWidget extends WidgetType {
+	constructor(
+		private readonly cols: number,
+		private readonly items: GalleryItem[],
+	) {
+		super();
+	}
+
+	toDOM(): HTMLElement {
+		const div = document.createElement('div');
+		div.className = `hugo-gallery hugo-gallery-cols-${this.cols}`;
+		console.log('[hugo] GalleryWidget.toDOM cols=', this.cols, 'className=', div.className, 'items=', this.items.length);
+
+		for (const item of this.items) {
+			div.appendChild(buildGalleryItemElement(
+				{ src: item.resolvedSrc, alt: item.alt, caption: item.caption },
+				item.resolvedSrc,
+			));
+		}
+
+		return div;
+	}
+
+	eq(other: GalleryWidget): boolean {
+		if (other.cols !== this.cols) return false;
+		if (other.items.length !== this.items.length) return false;
+		for (let i = 0; i < this.items.length; i++) {
+			const a = this.items[i]!;
+			const b = other.items[i]!;
+			if (a.resolvedSrc !== b.resolvedSrc || a.alt !== b.alt || a.caption !== b.caption) return false;
+		}
+		return true;
+	}
+}
+
+/* ---------------------------------------------------------------------------
+ * Live preview decoration builder
+ * ------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+ * Live preview — figure decorations (ViewPlugin, inline replacements only)
+ * ------------------------------------------------------------------------- */
+
+function buildFigureDecorations(view: EditorView, app: App): DecorationSet {
 	const builder = new RangeSetBuilder<Decoration>();
 
-	// Only decorate in live preview, not source mode.
 	if (!view.state.field(editorLivePreviewField, false)) return builder.finish();
 
 	const cursor = view.state.selection.main.head;
 	const sourcePath = view.state.field(editorInfoField, false)?.file?.path ?? '';
 
-	for (const { from, to } of view.visibleRanges) {
-		const text = view.state.doc.sliceString(from, to);
-		if (!FIGURE_RE.test(text)) continue;
+	const fullText = view.state.doc.toString();
+	if (!FIGURE_RE.test(fullText)) return builder.finish();
 
-		let ast;
-		try {
-			ast = parse(text);
-		} catch {
-			continue;
+	let ast;
+	try {
+		ast = parse(fullText);
+	} catch (e) {
+		console.log('[hugo] figure parse error:', e);
+		return builder.finish();
+	}
+
+	for (const node of ast) {
+		if (node.kind !== 'shortcode' || node.name !== 'figure') continue;
+
+		// Skip figures that are children of a gallery — those are handled by the
+		// gallery StateField.
+		// Top-level figure nodes have no parent in the flat AST iteration.
+		const start = node.start;
+		const end = node.end;
+
+		// Only decorate nodes that are at least partially visible.
+		let visible = false;
+		for (const { from, to } of view.visibleRanges) {
+			if (start <= to && end >= from) { visible = true; break; }
 		}
+		if (!visible) continue;
 
-		for (const node of findShortcodes(ast, 'figure')) {
-			const start = from + node.start;
-			const end = from + node.end;
-			const line = view.state.doc.lineAt(start);
+		const line = view.state.doc.lineAt(start);
+		if (view.hasFocus && cursor >= line.from && cursor <= line.to) continue;
 
-			// Show raw shortcode when the cursor is on this line so it's editable.
-			if (view.hasFocus && cursor >= line.from && cursor <= line.to) continue;
-
-			const attrs = attrsFromNode(node, app, sourcePath);
-			const resolvedSrc = resolveImageSrc(app, attrs.src, sourcePath);
-			builder.add(start, end, Decoration.replace({ widget: new FigureWidget(attrs, resolvedSrc) }));
-		}
+		const attrs = attrsFromNode(node, app, sourcePath);
+		const resolvedSrc = resolveImageSrc(app, attrs.src, sourcePath);
+		console.log('[hugo] figure: adding FigureWidget src=', attrs.src);
+		builder.add(start, end, Decoration.replace({ widget: new FigureWidget(attrs, resolvedSrc) }));
 	}
 
 	return builder.finish();
 }
 
+/* ---------------------------------------------------------------------------
+ * Live preview — gallery decorations (StateField, block replacements)
+ * StateField is required for block-level Decoration.replace — ViewPlugin does
+ * not support them.
+ * ------------------------------------------------------------------------- */
+
+function buildGalleryDecorations(state: EditorView['state'], app: App): DecorationSet {
+	const builder = new RangeSetBuilder<Decoration>();
+
+	if (!state.field(editorLivePreviewField, false)) return builder.finish();
+
+	const cursor = state.selection.main.head;
+	const sourcePath = state.field(editorInfoField, false)?.file?.path ?? '';
+
+	const fullText = state.doc.toString();
+	if (!GALLERY_RE.test(fullText)) return builder.finish();
+
+	let ast;
+	try {
+		ast = parse(fullText);
+	} catch (e) {
+		console.log('[hugo] gallery parse error:', e);
+		return builder.finish();
+	}
+
+	console.log('[hugo] gallery StateField: top-level nodes:', ast.map(n => n.kind === 'shortcode' ? `${n.name}(children:${n.children.length})` : 'text'));
+
+	for (const node of ast) {
+		if (node.kind !== 'shortcode' || node.name !== 'gallery') continue;
+
+		const start = node.start;
+		const end = node.end;
+
+		const startLine = state.doc.lineAt(start);
+		const endLine = state.doc.lineAt(end);
+		const cursorInside = cursor >= startLine.from && cursor <= endLine.to;
+		console.log('[hugo] gallery node start=', start, 'end=', end, 'cursorInside=', cursorInside);
+		if (cursorInside) continue;
+
+		const cols = getGalleryCols(node);
+		const items: GalleryItem[] = node.children
+			.filter((c): c is ShortcodeNode => c.kind === 'shortcode' && c.name === 'figure')
+			.map((child) => {
+				const attrs = attrsFromNode(child, app, sourcePath);
+				return {
+					resolvedSrc: resolveImageSrc(app, attrs.src, sourcePath),
+					alt: attrs.alt,
+					caption: attrs.caption,
+				};
+			});
+
+		console.log('[hugo] gallery: adding GalleryWidget cols=', cols, 'items=', items.length);
+		builder.add(start, end, Decoration.replace({ widget: new GalleryWidget(cols, items), block: true }));
+	}
+
+	return builder.finish();
+}
+
+function makeGalleryStateField(app: App): StateField<DecorationSet> {
+	return StateField.define<DecorationSet>({
+		create(state) {
+			return buildGalleryDecorations(state, app);
+		},
+		update(decorations, tr: Transaction) {
+			if (!tr.docChanged && !tr.selection) return decorations;
+			return buildGalleryDecorations(tr.state, app);
+		},
+		provide(field) {
+			return EditorView.decorations.from(field);
+		},
+	});
+}
+
 export function createFigureEditorExtension(app: App) {
-	return ViewPlugin.fromClass(
+	const figurePlugin = ViewPlugin.fromClass(
 		class {
 			decorations: DecorationSet;
 			constructor(view: EditorView) {
-				this.decorations = buildDecorations(view, app);
+				this.decorations = buildFigureDecorations(view, app);
 			}
 			update(update: ViewUpdate) {
 				if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged) {
-					this.decorations = buildDecorations(update.view, app);
+					this.decorations = buildFigureDecorations(update.view, app);
 				}
 			}
 		},
 		{ decorations: (v) => v.decorations },
 	);
+
+	const galleryField = makeGalleryStateField(app);
+
+	return [figurePlugin, galleryField];
 }
 
 /* ---------------------------------------------------------------------------
  * Markdown post-processor — reading view
  * ------------------------------------------------------------------------- */
 
+/**
+ * Walk forward through `startEl`'s siblings (inclusive) looking for the first
+ * `<p>` whose text content contains `{{< /gallery`. Returns the array of
+ * sibling elements from `startEl` through the closing tag paragraph, or null
+ * if no close tag is found within the same parent.
+ */
+function collectGalleryParagraphs(startEl: HTMLElement): HTMLElement[] | null {
+	const result: HTMLElement[] = [];
+	let el: Element | null = startEl;
+
+	while (el !== null) {
+		if (el instanceof HTMLElement) {
+			result.push(el);
+			if (el !== startEl && el.textContent?.includes('{{< /gallery')) {
+				return result;
+			}
+		}
+		el = el.nextElementSibling;
+	}
+
+	// No closing tag found in the same parent.
+	return null;
+}
+
 export function registerFigurePostProcessor(app: App, plugin: Plugin): void {
 	plugin.registerMarkdownPostProcessor((element: HTMLElement, context: MarkdownPostProcessorContext) => {
 		const { sourcePath } = context;
+		console.log('[hugo] post-processor called, sourcePath=', sourcePath, 'element.innerHTML snippet=', element.innerHTML.slice(0, 200));
+
+		// --- Pass 1: replace gallery shortcodes ---
+		// Work off a snapshot of current <p> elements because we'll mutate the DOM.
+		const paragraphs = Array.from(element.querySelectorAll('p'));
+		console.log('[hugo] post-processor found', paragraphs.length, 'paragraphs');
+
+		for (const p of paragraphs) {
+			// Skip if already removed by a prior iteration (e.g. a sibling of a
+			// previously processed gallery).
+			if (!p.isConnected) continue;
+
+			const text = p.textContent ?? '';
+			const galleryMatch = GALLERY_OPEN_RE.test(text);
+			console.log('[hugo] paragraph text=', JSON.stringify(text.slice(0, 80)), 'galleryMatch=', galleryMatch);
+			if (!galleryMatch) continue;
+
+			// Collect this <p> and all siblings up to and including the close tag.
+			const run = collectGalleryParagraphs(p);
+			console.log('[hugo] collectGalleryParagraphs returned', run === null ? 'null' : `${run.length} elements`);
+			if (run === null) continue;
+
+			// Join the text of the run to feed into the parser.
+			const joined = run.map((el) => el.textContent ?? '').join('\n');
+			console.log('[hugo] joined gallery text (first 200)=', JSON.stringify(joined.slice(0, 200)));
+
+			let ast;
+			try {
+				ast = parse(joined);
+			} catch (e) {
+				console.log('[hugo] gallery parse error:', e);
+				continue;
+			}
+
+			const galleries = findShortcodes(ast, 'gallery');
+			console.log('[hugo] found', galleries.length, 'gallery nodes in AST');
+			if (galleries.length === 0) continue;
+
+			// Build replacement DOM: one gallery div per parsed gallery node.
+			const fragment = document.createDocumentFragment();
+			for (const node of galleries) {
+				const el = buildGalleryElement(app, node, sourcePath);
+				console.log('[hugo] built gallery div with', el.children.length, 'items');
+				fragment.appendChild(el);
+			}
+
+			// Replace the entire run of <p> elements with the gallery div(s).
+			// Insert before the first element, then remove all elements in the run.
+			run[0]!.before(fragment);
+			for (const el of run) el.remove();
+		}
+
+		// --- Pass 2: replace standalone figure shortcodes ---
+		// Re-query so we only visit <p>s still in the DOM after the gallery pass.
 		element.querySelectorAll('p').forEach((p) => {
 			const text = p.textContent ?? '';
 			if (!FIGURE_RE.test(text)) return;
@@ -196,6 +477,7 @@ export function registerFigurePostProcessor(app: App, plugin: Plugin): void {
 			const figures = findShortcodes(ast, 'figure');
 			if (figures.length === 0) return;
 
+			console.log('[hugo] replacing', figures.length, 'standalone figure(s) in paragraph');
 			// Replace the paragraph with one <figure> element per shortcode found.
 			const fragment = document.createDocumentFragment();
 			for (const node of figures) {

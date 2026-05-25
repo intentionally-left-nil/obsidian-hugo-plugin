@@ -21,6 +21,43 @@
 	font-style: italic;
 }
 
+/* Hugo gallery shortcode rendering (preview / reading view) */
+
+.hugo-gallery {
+	display: grid !important;
+	gap: 1rem;
+	margin: 2rem 0;
+	width: 100%;
+	box-sizing: border-box;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hugo-gallery-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+.hugo-gallery-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hugo-gallery-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.hugo-gallery-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.hugo-gallery-item {
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.hugo-gallery-item-img {
+	width: 100%;
+	height: auto;
+	display: block;
+	border-radius: 4px;
+}
+
+.hugo-gallery-item-caption {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	margin-top: 0.5rem;
+	line-height: 1.4;
+}
+
+
 /* Hugo images side panel */
 
 .hugo-images-view {
