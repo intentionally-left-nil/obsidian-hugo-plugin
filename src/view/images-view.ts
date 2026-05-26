@@ -2,6 +2,9 @@ import {
 	ItemView,
 	Notice,
 	TFile,
+	TFolder,
+	setIcon,
+	requestUrl,
 	type App,
 	type TAbstractFile,
 	type WorkspaceLeaf,
@@ -25,6 +28,8 @@ import {
 } from '../parser/post';
 import { getImagesFolder, isHugoPost, listImageFiles } from '../utils/paths';
 import { renderCard } from './image-card';
+import { AddImageModal } from './add-image-modal';
+import { addImageFromFile, addImageFromUrl, type AddImageAdapter } from '../utils/add-image';
 
 export const VIEW_TYPE_HUGO_IMAGES = 'hugo-images-view';
 
@@ -34,6 +39,7 @@ export class HugoImagesView extends ItemView {
 	private parsed: ParsedPost | null = null;
 	private parseError: ShortcodeParseError | null = null;
 	private adapter: PostAdapter;
+	private addAdapter: AddImageAdapter;
 	private renderTimer: number | null = null;
 	private isWriting = false;
 
@@ -41,6 +47,7 @@ export class HugoImagesView extends ItemView {
 		super(leaf);
 		this.app2 = app;
 		this.adapter = makeObsidianAdapter(app);
+		this.addAdapter = makeAddImageAdapter(app);
 	}
 
 	getViewType(): string {
@@ -204,10 +211,11 @@ export class HugoImagesView extends ItemView {
 		}
 
 		const folderName = this.postFile.parent?.name ?? '';
-		container.createDiv({
-			cls: 'hugo-images-header',
-			text: folderName ? `${folderName} / index.md` : 'index.md',
-		});
+		const header = container.createDiv({ cls: 'hugo-images-header' });
+		header.createSpan({ text: folderName ? `${folderName} / index.md` : 'index.md' });
+		const addBtn = header.createEl('button', { cls: 'hugo-images-add-btn', attr: { 'aria-label': 'Add image' } });
+		setIcon(addBtn, 'plus');
+		addBtn.addEventListener('click', () => this.handleAddImage());
 
 		if (this.parsed.images.length === 0) {
 			container.createDiv({
@@ -348,15 +356,49 @@ export class HugoImagesView extends ItemView {
 		});
 	}
 
+	private handleAddImage(): void {
+		if (!this.postFile) return;
+		const post = this.postFile;
+		new AddImageModal(this.app2, (choice) => {
+			void this.runWrite(async () => {
+				let newFile: TFile;
+				if (choice.kind === 'file') {
+					newFile = await addImageFromFile(this.addAdapter, post, choice.file);
+				} else {
+					newFile = await addImageFromUrl(this.addAdapter, post, choice.url, choice.filename || undefined);
+				}
+
+				// Derive the src path relative to the post folder (same as deriveSrcFromFile).
+				const folder = post.parent?.path ?? '';
+				const src = folder && newFile.path.startsWith(`${folder}/`)
+					? newFile.path.slice(folder.length + 1)
+					: newFile.path;
+
+				// Append a figure shortcode to the body.
+				await this.adapter.processBody(post, (raw) => {
+					const split = splitFrontmatter(raw);
+					const newBody = appendFigureToBody(split.body, src);
+					return raw.slice(0, split.bodyStart) + newBody;
+				});
+
+				new Notice(`Added ${newFile.name}`);
+			});
+		}).open();
+	}
+
 	private async runWrite(fn: () => Promise<void>): Promise<void> {
+		console.log(`[hugo-images] runWrite() start, isWriting=${this.isWriting}`);
 		this.isWriting = true;
 		try {
 			await fn();
+			console.log(`[hugo-images] runWrite() fn() completed successfully`);
 		} catch (err) {
 			console.error('Hugo images write failed', err);
-			new Notice('Edit failed — see console');
+			const msg = err instanceof Error ? err.message : String(err);
+			new Notice(`Hugo images: ${msg}`);
 		} finally {
 			this.isWriting = false;
+			console.log(`[hugo-images] runWrite() calling reload()`);
 			await this.reload();
 		}
 	}
@@ -367,7 +409,7 @@ export class HugoImagesView extends ItemView {
  */
 export function makeObsidianAdapter(app: App): PostAdapter {
 	return {
-		readBody: async (file) => app.vault.cachedRead(file),
+		readBody: async (file) => app.vault.read(file),
 		getFrontmatter: (file) => {
 			const cache = app.metadataCache.getFileCache(file);
 			return cache?.frontmatter as Record<string, unknown> | undefined;
@@ -393,6 +435,37 @@ export function makeObsidianAdapter(app: App): PostAdapter {
 		processFrontMatter: (file, fn) => app.fileManager.processFrontMatter(file, fn),
 		processBody: async (file, fn) => {
 			await app.vault.process(file, fn);
+		},
+	};
+}
+
+/**
+ * Build an `AddImageAdapter` that delegates to the Obsidian `App` instance.
+ */
+export function makeAddImageAdapter(app: App): AddImageAdapter {
+	return {
+		ensureImagesFolder: async (post: TFile): Promise<string> => {
+			const parent = post.parent;
+			if (!parent) throw new Error('Post has no parent folder');
+			const folderPath = `${parent.path}/images`;
+			const existing = app.vault.getAbstractFileByPath(folderPath);
+			if (existing instanceof TFolder) return folderPath;
+			await app.vault.createFolder(folderPath);
+			return folderPath;
+		},
+		fileExists: (path: string): boolean => {
+			return app.vault.getAbstractFileByPath(path) !== null;
+		},
+		createBinary: async (path: string, data: ArrayBuffer): Promise<TFile> => {
+			return app.vault.createBinary(path, data);
+		},
+		requestUrl: async (opts: { url: string }) => {
+			const response = await requestUrl({ url: opts.url, method: 'GET' });
+			return {
+				status: response.status,
+				arrayBuffer: response.arrayBuffer,
+				headers: response.headers as Record<string, string>,
+			};
 		},
 	};
 }

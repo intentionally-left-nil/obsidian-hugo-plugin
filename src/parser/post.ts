@@ -247,23 +247,30 @@ export function findShortcodeForEntry(
 	entry: ReferencedImageEntry,
 ): ShortcodeNode | null {
 	const topLevel = ast.filter((n): n is ShortcodeNode => n.kind === 'shortcode');
-	const figures = topLevel
-		.map((node, idx) => ({ node, idx }))
-		.filter(({ node }) => node.name === 'figure');
+
+	// Build a list of top-level figure nodes paired with their figureIndex,
+	// which matches the counter used in buildImageEntries: increments only for
+	// figure nodes, not for galleries or other shortcodes.
+	let fi = 0;
+	const figures: { node: ShortcodeNode; figureIndex: number }[] = [];
+	for (const node of topLevel) {
+		if (node.name === 'figure') {
+			figures.push({ node, figureIndex: fi });
+			fi++;
+		}
+	}
 
 	switch (entry.source.kind) {
 		case 'cover':
 			return null;
 		case 'figure': {
 			const target = entry.source.nodeIndex;
-			return figures.find(({ idx }) => idx === target)?.node ?? null;
+			return figures.find(({ figureIndex }) => figureIndex === target)?.node ?? null;
 		}
 		case 'figure-cover': {
-			// Multiple — return the first one; the writer for cover edits operates
-			// on frontmatter rather than this shortcode.
 			const first = entry.source.nodeIndexes[0];
 			if (first === undefined) return null;
-			return figures.find(({ idx }) => idx === first)?.node ?? null;
+			return figures.find(({ figureIndex }) => figureIndex === first)?.node ?? null;
 		}
 		case 'gallery-item': {
 			const source = entry.source;

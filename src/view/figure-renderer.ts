@@ -1,5 +1,5 @@
 import { App, MarkdownPostProcessorContext, Plugin, TFile, editorInfoField, editorLivePreviewField } from 'obsidian';
-import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
+import { Decoration, DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { RangeSetBuilder, StateField, Transaction } from '@codemirror/state';
 import { parse, findShortcodes } from '../parser/shortcodes';
 import type { ShortcodeNode } from '../types';
@@ -237,51 +237,56 @@ class GalleryWidget extends WidgetType {
  * Live preview — figure decorations (ViewPlugin, inline replacements only)
  * ------------------------------------------------------------------------- */
 
-function buildFigureDecorations(view: EditorView, app: App): DecorationSet {
+function buildFigureDecorations(state: EditorView['state'], app: App): DecorationSet {
 	const builder = new RangeSetBuilder<Decoration>();
 
-	if (!view.state.field(editorLivePreviewField, false)) return builder.finish();
+	if (!state.field(editorLivePreviewField, false)) return builder.finish();
 
-	const cursor = view.state.selection.main.head;
-	const sourcePath = view.state.field(editorInfoField, false)?.file?.path ?? '';
+	const cursor = state.selection.main.head;
+	const sourcePath = state.field(editorInfoField, false)?.file?.path ?? '';
 
-	const fullText = view.state.doc.toString();
+	const fullText = state.doc.toString();
 	if (!FIGURE_RE.test(fullText)) return builder.finish();
 
 	let ast;
 	try {
 		ast = parse(fullText);
 	} catch (e) {
-		console.log('[hugo] figure parse error:', e);
 		return builder.finish();
 	}
 
 	for (const node of ast) {
 		if (node.kind !== 'shortcode' || node.name !== 'figure') continue;
 
-		// Skip figures that are children of a gallery — those are handled by the
-		// gallery StateField.
-		// Top-level figure nodes have no parent in the flat AST iteration.
 		const start = node.start;
 		const end = node.end;
 
-		// Only decorate nodes that are at least partially visible.
-		let visible = false;
-		for (const { from, to } of view.visibleRanges) {
-			if (start <= to && end >= from) { visible = true; break; }
-		}
-		if (!visible) continue;
-
-		const line = view.state.doc.lineAt(start);
-		if (view.hasFocus && cursor >= line.from && cursor <= line.to) continue;
+		const startLine = state.doc.lineAt(start);
+		const endLine = state.doc.lineAt(end);
+		const cursorInside = cursor >= startLine.from && cursor <= endLine.to;
+		if (cursorInside) continue;
 
 		const attrs = attrsFromNode(node, app, sourcePath);
 		const resolvedSrc = resolveImageSrc(app, attrs.src, sourcePath);
-		console.log('[hugo] figure: adding FigureWidget src=', attrs.src);
-		builder.add(start, end, Decoration.replace({ widget: new FigureWidget(attrs, resolvedSrc) }));
+		builder.add(start, end, Decoration.replace({ widget: new FigureWidget(attrs, resolvedSrc), block: true }));
 	}
 
 	return builder.finish();
+}
+
+function makeFigureStateField(app: App): StateField<DecorationSet> {
+	return StateField.define<DecorationSet>({
+		create(state) {
+			return buildFigureDecorations(state, app);
+		},
+		update(decorations, tr: Transaction) {
+			if (!tr.docChanged && !tr.selection) return decorations;
+			return buildFigureDecorations(tr.state, app);
+		},
+		provide(field) {
+			return EditorView.decorations.from(field);
+		},
+	});
 }
 
 /* ---------------------------------------------------------------------------
@@ -358,24 +363,9 @@ function makeGalleryStateField(app: App): StateField<DecorationSet> {
 }
 
 export function createFigureEditorExtension(app: App) {
-	const figurePlugin = ViewPlugin.fromClass(
-		class {
-			decorations: DecorationSet;
-			constructor(view: EditorView) {
-				this.decorations = buildFigureDecorations(view, app);
-			}
-			update(update: ViewUpdate) {
-				if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged) {
-					this.decorations = buildFigureDecorations(update.view, app);
-				}
-			}
-		},
-		{ decorations: (v) => v.decorations },
-	);
-
+	const figureField = makeFigureStateField(app);
 	const galleryField = makeGalleryStateField(app);
-
-	return [figurePlugin, galleryField];
+	return [figureField, galleryField];
 }
 
 /* ---------------------------------------------------------------------------

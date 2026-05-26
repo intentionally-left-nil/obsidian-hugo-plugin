@@ -347,4 +347,26 @@ describe('findShortcodeForEntry', () => {
 		const node = findShortcodeForEntry(post.ast, entry);
 		expect(node?.args.named.get('src')?.value).toBe('images/y.png');
 	});
+
+	it('returns the right figure when a gallery precedes standalone figures', async () => {
+		// Regression: figureIndex counts only figure nodes, but the old code used
+		// the position within the mixed topLevel array (which included galleries),
+		// so nodeIndex 0 resolved to the gallery (wrong) instead of the figure.
+		const post = await loadPost({
+			postPath: 'blog/p/index.md',
+			rawContent: [
+				'{{< gallery >}}{{< figure src="images/g.png" />}}{{< /gallery >}}',
+				'{{< figure src="images/a.png" />}}',
+				'{{< figure src="images/b.png" />}}',
+			].join('\n'),
+			imageFiles: ['blog/p/images/g.png', 'blog/p/images/a.png', 'blog/p/images/b.png'],
+		});
+		// images[0] = gallery item g.png, images[1] = standalone a.png, images[2] = standalone b.png
+		const entryA = post.images[1] as ReferencedImageEntry;
+		const entryB = post.images[2] as ReferencedImageEntry;
+		expect(entryA.source).toMatchObject({ kind: 'figure', nodeIndex: 0 });
+		expect(entryB.source).toMatchObject({ kind: 'figure', nodeIndex: 1 });
+		expect(findShortcodeForEntry(post.ast, entryA)?.args.named.get('src')?.value).toBe('images/a.png');
+		expect(findShortcodeForEntry(post.ast, entryB)?.args.named.get('src')?.value).toBe('images/b.png');
+	});
 });
