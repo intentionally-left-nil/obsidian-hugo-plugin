@@ -5,5 +5,5 @@
 	"minAppVersion": "1.4.4",
 	"description": "Manage images for Hugo blog posts using the minnak theme.",
 	"author": "Anil",
-	"isDesktopOnly": false
+	"isDesktopOnly": true
 }
