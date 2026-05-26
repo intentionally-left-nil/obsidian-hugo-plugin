@@ -335,6 +335,56 @@ export function setShortcodeArgs(
 	return applyEdits(body, [{ start: node.start, end: openEnd, replacement }]);
 }
 
+/**
+ * Set or clear the `cover=true` arg on the figure shortcode at `nodeIndex`
+ * (using the same figure-index counter as `buildImageEntries`). Pass
+ * `coverValue = true` to add `cover=true`; pass `false` to remove it.
+ *
+ * The `src`, `alt`, and `caption` args are stripped when adding `cover=true`
+ * because those values live in the frontmatter once the image is a cover.
+ * When removing `cover=true`, those args are left untouched (the caller is
+ * responsible for re-populating them from the frontmatter if needed — but for
+ * the demotion case the whole cover is being cleared anyway).
+ */
+export function setFigureCoverArg(
+	body: string,
+	nodeIndex: number,
+	coverValue: boolean,
+): string {
+	const ast = parse(body);
+	const topLevel = ast.filter((n): n is ShortcodeNode => n.kind === 'shortcode');
+	let fi = 0;
+	let target: ShortcodeNode | null = null;
+	for (const node of topLevel) {
+		if (node.name === 'figure') {
+			if (fi === nodeIndex) {
+				target = node;
+				break;
+			}
+			fi++;
+		}
+	}
+	if (!target) return body;
+
+	const newArgs: ShortcodeNode['args'] = {
+		named: new Map(target.args.named),
+		positional: [...target.args.positional],
+	};
+	if (coverValue) {
+		newArgs.named.set('cover', { value: 'true' });
+		// Strip src/alt/caption from the shortcode — frontmatter is the source of truth.
+		newArgs.named.delete('src');
+		newArgs.named.delete('alt');
+		newArgs.named.delete('caption');
+	} else {
+		newArgs.named.delete('cover');
+	}
+	const newNode: ShortcodeNode = { ...target, args: newArgs };
+	const openEnd = target.selfClosing ? target.end : target.innerStart ?? target.end;
+	const replacement = serializeShortcodeOpen(newNode);
+	return applyEdits(body, [{ start: target.start, end: openEnd, replacement }]);
+}
+
 export function appendFigureToBody(body: string, src: string): string {
 	const figure = `{{< figure src="${escapeForDoubleQuoted(src)}" >}}`;
 	if (body.length === 0) return `${figure}\n`;

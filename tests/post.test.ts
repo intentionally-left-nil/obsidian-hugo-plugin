@@ -7,6 +7,7 @@ import {
 	stripFigureCoverOverrides,
 	collectCoverMigration,
 	findShortcodeForEntry,
+	setFigureCoverArg,
 	type PostAdapter,
 } from '../src/parser/post';
 import { parse } from '../src/parser/shortcodes';
@@ -368,5 +369,53 @@ describe('findShortcodeForEntry', () => {
 		expect(entryB.source).toMatchObject({ kind: 'figure', nodeIndex: 1 });
 		expect(findShortcodeForEntry(post.ast, entryA)?.args.named.get('src')?.value).toBe('images/a.png');
 		expect(findShortcodeForEntry(post.ast, entryB)?.args.named.get('src')?.value).toBe('images/b.png');
+	});
+});
+
+/* ---------------------------------------------------------------------------
+ * setFigureCoverArg
+ * ------------------------------------------------------------------------- */
+
+describe('setFigureCoverArg', () => {
+	it('adds cover=true and strips src/alt/caption from the target figure', () => {
+		const body = '{{< figure src="images/a.png" alt="A" caption="Cap" />}}';
+		const result = setFigureCoverArg(body, 0, true);
+		expect(result).toBe('{{< figure cover=true />}}');
+	});
+
+	it('removes cover=true from a figure-cover shortcode', () => {
+		const body = '{{< figure cover=true />}}';
+		const result = setFigureCoverArg(body, 0, false);
+		expect(result).toBe('{{< figure />}}');
+	});
+
+	it('only modifies the figure at the given nodeIndex', () => {
+		const body = [
+			'{{< figure src="images/a.png" />}}',
+			'{{< figure src="images/b.png" alt="B" />}}',
+		].join('\n');
+		const result = setFigureCoverArg(body, 1, true);
+		expect(result).toBe([
+			'{{< figure src="images/a.png" />}}',
+			'{{< figure cover=true />}}',
+		].join('\n'));
+	});
+
+	it('returns body unchanged when nodeIndex is out of range', () => {
+		const body = '{{< figure src="images/a.png" />}}';
+		const result = setFigureCoverArg(body, 5, true);
+		expect(result).toBe(body);
+	});
+
+	it('skips gallery shortcodes when counting figure nodeIndex', () => {
+		const body = [
+			'{{< gallery >}}{{< figure src="images/g.png" />}}{{< /gallery >}}',
+			'{{< figure src="images/a.png" />}}',
+		].join('\n');
+		// The standalone figure has nodeIndex=0 (galleries are not counted).
+		const result = setFigureCoverArg(body, 0, true);
+		expect(result).toContain('cover=true');
+		expect(result).not.toContain('images/a.png'); // src stripped when adding cover
+		expect(result).toContain('images/g.png'); // gallery item untouched
 	});
 });

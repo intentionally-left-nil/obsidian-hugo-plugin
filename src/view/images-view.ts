@@ -21,6 +21,7 @@ import {
 	collectCoverMigration,
 	findShortcodeForEntry,
 	readPost,
+	setFigureCoverArg,
 	setShortcodeArgs,
 	splitFrontmatter,
 	stripFigureCoverOverrides,
@@ -322,6 +323,16 @@ export class HugoImagesView extends ItemView {
 				await this.adapter.processFrontMatter(this.postFile!, (fm) => {
 					delete fm['cover'];
 				});
+				// If the cover had a figure shortcode, remove cover=true from it.
+				if (entry.source.kind === 'figure-cover') {
+					for (const nodeIndex of entry.source.nodeIndexes) {
+						await this.adapter.processBody(this.postFile!, (raw) => {
+							const split = splitFrontmatter(raw);
+							const newBody = setFigureCoverArg(split.body, nodeIndex, false);
+							return raw.slice(0, split.bodyStart) + newBody;
+						});
+					}
+				}
 			});
 			return;
 		}
@@ -334,6 +345,15 @@ export class HugoImagesView extends ItemView {
 					if (entry.caption) next['caption'] = entry.caption;
 					fm['cover'] = next;
 				});
+				// If the entry is a figure shortcode, add cover=true to it.
+				if (entry.source.kind === 'figure') {
+					const nodeIndex = entry.source.nodeIndex;
+					await this.adapter.processBody(this.postFile!, (raw) => {
+						const split = splitFrontmatter(raw);
+						const newBody = setFigureCoverArg(split.body, nodeIndex, true);
+						return raw.slice(0, split.bodyStart) + newBody;
+					});
+				}
 			});
 			return;
 		}
