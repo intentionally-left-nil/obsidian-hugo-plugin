@@ -385,6 +385,93 @@ export function setFigureCoverArg(
 	return applyEdits(body, [{ start: target.start, end: openEnd, replacement }]);
 }
 
+/**
+ * Remove the shortcode associated with an image entry from the body string.
+ *
+ * - `figure` entries: the entire `{{< figure ... >}}` line (including its
+ *   trailing newline) is deleted.
+ * - `figure-cover` entries: same — the figure shortcode line is deleted. The
+ *   caller is responsible for also clearing the frontmatter cover key.
+ * - `gallery-item` entries: the child `{{< figure />}}` inside the gallery is
+ *   removed. If that makes the gallery empty, the whole gallery block is
+ *   removed too.
+ * - `cover` entries (frontmatter-only): body is returned unchanged — there is
+ *   no shortcode to remove.
+ *
+ * Surrounding blank lines are collapsed so there is at most one blank line
+ * where the shortcode was.
+ */
+export function removeShortcodeFromBody(
+	body: string,
+	entry: ReferencedImageEntry,
+): string {
+	if (entry.source.kind === 'cover') return body;
+
+	const ast = parse(body);
+	const topLevel = ast.filter((n): n is ShortcodeNode => n.kind === 'shortcode');
+
+	if (entry.source.kind === 'figure' || entry.source.kind === 'figure-cover') {
+		// Find the figure node by nodeIndex (figure-only counter).
+		const nodeIndex = entry.source.kind === 'figure'
+			? entry.source.nodeIndex
+			: entry.source.nodeIndexes[0] ?? 0;
+		let fi = 0;
+		let target: ShortcodeNode | null = null;
+		for (const node of topLevel) {
+			if (node.name === 'figure') {
+				if (fi === nodeIndex) { target = node; break; }
+				fi++;
+			}
+		}
+		if (!target) return body;
+		return exciseNode(body, target.start, target.end);
+	}
+
+	if (entry.source.kind === 'gallery-item') {
+		const { galleryIndex, childIndex } = entry.source;
+		let gi = 0;
+		let gallery: ShortcodeNode | null = null;
+		for (const node of topLevel) {
+			if (node.name === 'gallery') {
+				if (gi === galleryIndex) { gallery = node; break; }
+				gi++;
+			}
+		}
+		if (!gallery) return body;
+
+		const childFigures = gallery.children.filter(
+			(c): c is ShortcodeNode => c.kind === 'shortcode' && c.name === 'figure',
+		);
+		const childNode = childFigures[childIndex];
+		if (!childNode) return body;
+
+		// If this is the only figure in the gallery, remove the entire gallery.
+		if (childFigures.length === 1) {
+			return exciseNode(body, gallery.start, gallery.end);
+		}
+
+		// Otherwise just remove the child figure tag inside the gallery.
+		return exciseNode(body, childNode.start, childNode.end);
+	}
+
+	return body;
+}
+
+/**
+ * Remove the byte range [start, end) from `body` and collapse any run of
+ * more than two consecutive newlines that results into a single blank line.
+ */
+function exciseNode(body: string, start: number, end: number): string {
+	// Extend `end` forward past the trailing newline (if any) so we don't
+	// leave an orphan blank line.
+	let trimEnd = end;
+	if (body[trimEnd] === '\n') trimEnd++;
+
+	const result = body.slice(0, start) + body.slice(trimEnd);
+	// Collapse 3+ consecutive newlines down to 2 (one blank line).
+	return result.replace(/\n{3,}/g, '\n\n');
+}
+
 export function appendFigureToBody(body: string, src: string): string {
 	const figure = `{{< figure src="${escapeForDoubleQuoted(src)}" >}}`;
 	if (body.length === 0) return `${figure}\n`;

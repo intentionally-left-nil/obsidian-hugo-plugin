@@ -8,6 +8,7 @@ import {
 	collectCoverMigration,
 	findShortcodeForEntry,
 	setFigureCoverArg,
+	removeShortcodeFromBody,
 	type PostAdapter,
 } from '../src/parser/post';
 import { parse } from '../src/parser/shortcodes';
@@ -417,5 +418,133 @@ describe('setFigureCoverArg', () => {
 		expect(result).toContain('cover=true');
 		expect(result).not.toContain('images/a.png'); // src stripped when adding cover
 		expect(result).toContain('images/g.png'); // gallery item untouched
+	});
+});
+
+/* ---------------------------------------------------------------------------
+ * removeShortcodeFromBody
+ * ------------------------------------------------------------------------- */
+
+describe('removeShortcodeFromBody', () => {
+	function figureEntry(nodeIndex: number, extra: Partial<import('../src/types').ReferencedImageEntry> = {}): import('../src/types').ReferencedImageEntry {
+		return {
+			kind: 'referenced',
+			source: { kind: 'figure', nodeIndex },
+			src: 'images/a.png',
+			file: null,
+			alt: '',
+			caption: '',
+			isCover: false,
+			...extra,
+		};
+	}
+
+	function figureCoverEntry(nodeIndexes: number[]): import('../src/types').ReferencedImageEntry {
+		return {
+			kind: 'referenced',
+			source: { kind: 'figure-cover', nodeIndexes },
+			src: 'images/a.png',
+			file: null,
+			alt: '',
+			caption: '',
+			isCover: true,
+		};
+	}
+
+	function galleryItemEntry(galleryIndex: number, childIndex: number): import('../src/types').ReferencedImageEntry {
+		return {
+			kind: 'referenced',
+			source: { kind: 'gallery-item', galleryIndex, childIndex },
+			src: 'images/a.png',
+			file: null,
+			alt: '',
+			caption: '',
+			isCover: false,
+		};
+	}
+
+	function coverOnlyEntry(): import('../src/types').ReferencedImageEntry {
+		return {
+			kind: 'referenced',
+			source: { kind: 'cover' },
+			src: 'images/a.png',
+			file: null,
+			alt: '',
+			caption: '',
+			isCover: true,
+		};
+	}
+
+	it('removes a standalone figure shortcode', () => {
+		const body = '{{< figure src="images/a.png" />}}\n';
+		const result = removeShortcodeFromBody(body, figureEntry(0));
+		expect(result).toBe('');
+	});
+
+	it('removes the correct figure when multiple are present', () => {
+		const body = [
+			'{{< figure src="images/a.png" />}}',
+			'{{< figure src="images/b.png" />}}',
+			'{{< figure src="images/c.png" />}}',
+		].join('\n') + '\n';
+		const result = removeShortcodeFromBody(body, figureEntry(1));
+		expect(result).toContain('images/a.png');
+		expect(result).not.toContain('images/b.png');
+		expect(result).toContain('images/c.png');
+	});
+
+	it('removes a figure-cover shortcode', () => {
+		const body = 'intro\n\n{{< figure cover=true />}}\n\noutro\n';
+		const result = removeShortcodeFromBody(body, figureCoverEntry([0]));
+		expect(result).not.toContain('figure');
+		expect(result).toContain('intro');
+		expect(result).toContain('outro');
+	});
+
+	it('leaves body unchanged for a cover-only (frontmatter) entry', () => {
+		const body = 'No shortcodes here.\n';
+		const result = removeShortcodeFromBody(body, coverOnlyEntry());
+		expect(result).toBe(body);
+	});
+
+	it('removes a gallery entirely when it has only one figure child', () => {
+		const body = '{{< gallery >}}\n{{< figure src="images/a.png" />}}\n{{< /gallery >}}\n';
+		const result = removeShortcodeFromBody(body, galleryItemEntry(0, 0));
+		expect(result.trim()).toBe('');
+	});
+
+	it('removes only the target child from a multi-item gallery', () => {
+		const body = [
+			'{{< gallery >}}',
+			'{{< figure src="images/a.png" />}}',
+			'{{< figure src="images/b.png" />}}',
+			'{{< /gallery >}}',
+		].join('\n') + '\n';
+		const result = removeShortcodeFromBody(body, galleryItemEntry(0, 0));
+		expect(result).not.toContain('images/a.png');
+		expect(result).toContain('images/b.png');
+		expect(result).toContain('gallery');
+	});
+
+	it('collapses excess blank lines left after removal', () => {
+		const body = 'before\n\n{{< figure src="images/a.png" />}}\n\nafter\n';
+		const result = removeShortcodeFromBody(body, figureEntry(0));
+		// Should not have more than one consecutive blank line.
+		expect(result).not.toMatch(/\n{3,}/);
+		expect(result).toContain('before');
+		expect(result).toContain('after');
+	});
+
+	it('skips gallery nodes when counting figure nodeIndex', () => {
+		const body = [
+			'{{< gallery >}}{{< figure src="images/g.png" />}}{{< /gallery >}}',
+			'{{< figure src="images/a.png" />}}',
+			'{{< figure src="images/b.png" />}}',
+		].join('\n') + '\n';
+		// Standalone figures have nodeIndex 0 and 1; galleries are skipped.
+		const result = removeShortcodeFromBody(body, figureEntry(0));
+		expect(result).not.toContain('images/a.png');
+		expect(result).toContain('images/b.png');
+		expect(result).toContain('images/g.png'); // gallery untouched
 	});
 });

@@ -1,4 +1,5 @@
 import type { App, TFile } from 'obsidian';
+import { setIcon } from 'obsidian';
 import type { ImageEntry, ReferencedImageEntry, UnreferencedImageEntry } from '../types';
 import { isExternalUrl, isInsidePostBundle } from '../utils/paths';
 
@@ -7,6 +8,7 @@ export interface ImageCardCallbacks {
 	onCaptionChanged(entry: ReferencedImageEntry, value: string): void;
 	onCoverChanged(entry: ReferencedImageEntry, isCover: boolean): void;
 	onInsert(entry: UnreferencedImageEntry): void;
+	onDelete(entry: ImageEntry): void;
 }
 
 const DEBOUNCE_MS = 300;
@@ -25,7 +27,16 @@ export function renderCard(
 	renderThumbnail(card, app, entry);
 
 	const fields = card.createDiv({ cls: 'hugo-image-fields' });
-	fields.createDiv({ cls: 'hugo-image-src', text: entry.src });
+
+	// Top row: src path + delete button
+	const srcRow = fields.createDiv({ cls: 'hugo-image-src-row' });
+	srcRow.createDiv({ cls: 'hugo-image-src', text: entry.src });
+	const deleteBtn = srcRow.createEl('button', {
+		cls: 'hugo-image-delete-btn',
+		attr: { 'aria-label': 'Delete image' },
+	});
+	setIcon(deleteBtn, 'trash-2');
+	deleteBtn.addEventListener('click', () => callbacks.onDelete(entry));
 
 	if (entry.kind === 'referenced') {
 		renderReferencedFields(fields, post, entry, callbacks);

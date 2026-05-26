@@ -21,6 +21,7 @@ import {
 	collectCoverMigration,
 	findShortcodeForEntry,
 	readPost,
+	removeShortcodeFromBody,
 	setFigureCoverArg,
 	setShortcodeArgs,
 	splitFrontmatter,
@@ -273,6 +274,9 @@ export class HugoImagesView extends ItemView {
 			onInsert: (entry: UnreferencedImageEntry) => {
 				void this.handleInsert(entry);
 			},
+			onDelete: (entry: ImageEntry) => {
+				void this.handleDelete(entry);
+			},
 		};
 	}
 
@@ -358,6 +362,35 @@ export class HugoImagesView extends ItemView {
 			return;
 		}
 		// No-op: checking a cover that's already the cover, or unchecking a non-cover.
+	}
+
+	private async handleDelete(entry: ImageEntry): Promise<void> {
+		if (!this.postFile || !this.parsed) return;
+
+		await this.runWrite(async () => {
+			// 1. Remove the shortcode from the body (no-op for cover-only entries).
+			if (entry.kind === 'referenced') {
+				await this.adapter.processBody(this.postFile!, (raw) => {
+					const split = splitFrontmatter(raw);
+					const newBody = removeShortcodeFromBody(split.body, entry);
+					return raw.slice(0, split.bodyStart) + newBody;
+				});
+
+				// 2. If this was the cover, clear the frontmatter cover key too.
+				if (entry.isCover) {
+					await this.adapter.processFrontMatter(this.postFile!, (fm) => {
+						delete fm['cover'];
+					});
+				}
+			}
+
+			// 3. Delete the physical file from the vault (only for files inside
+			//    the post bundle — external URLs and missing files are skipped).
+			const file = entry.kind === 'referenced' ? entry.file : entry.file;
+			if (file) {
+				await this.app2.vault.trash(file, true);
+			}
+		});
 	}
 
 	private async handleInsert(entry: UnreferencedImageEntry): Promise<void> {
