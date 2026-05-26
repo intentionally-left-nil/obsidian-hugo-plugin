@@ -14,6 +14,7 @@ interface FigureAttrs {
 	src: string;
 	alt: string;
 	caption: string;
+	maxheight: string;
 }
 
 /**
@@ -43,7 +44,12 @@ function attrsFromNode(node: ShortcodeNode, app: App, sourcePath: string): Figur
 	if (isCover) {
 		const cover = getCoverFrontmatter(app, sourcePath);
 		if (cover) {
-			return { src: cover.src, alt: cover.alt, caption: cover.caption };
+			return {
+				src: cover.src,
+				alt: cover.alt,
+				caption: cover.caption,
+				maxheight: node.args.named.get('maxheight')?.value ?? '',
+			};
 		}
 		// Fallback: cover frontmatter missing, try inline args (pre-migration state).
 	}
@@ -52,6 +58,7 @@ function attrsFromNode(node: ShortcodeNode, app: App, sourcePath: string): Figur
 		src: node.args.named.get('src')?.value ?? node.args.positional[0]?.value ?? '',
 		alt: node.args.named.get('alt')?.value ?? '',
 		caption: node.args.named.get('caption')?.value ?? '',
+		maxheight: node.args.named.get('maxheight')?.value ?? '',
 	};
 }
 
@@ -90,6 +97,7 @@ function buildFigureElement(app: App, attrs: FigureAttrs, sourcePath: string): H
 	img.className = 'hugo-figure-img';
 	img.src = resolveImageSrc(app, attrs.src, sourcePath);
 	img.alt = attrs.alt;
+	if (attrs.maxheight) img.style.maxHeight = `${attrs.maxheight}px`;
 	figure.appendChild(img);
 
 	if (attrs.caption) {
@@ -167,6 +175,7 @@ class FigureWidget extends WidgetType {
 		img.className = 'hugo-figure-img';
 		img.src = this.resolvedSrc;
 		img.alt = this.attrs.alt;
+		if (this.attrs.maxheight) img.style.maxHeight = `${this.attrs.maxheight}px`;
 		figure.appendChild(img);
 
 		if (this.attrs.caption) {
@@ -183,7 +192,8 @@ class FigureWidget extends WidgetType {
 		return (
 			other.resolvedSrc === this.resolvedSrc &&
 			other.attrs.alt === this.attrs.alt &&
-			other.attrs.caption === this.attrs.caption
+			other.attrs.caption === this.attrs.caption &&
+			other.attrs.maxheight === this.attrs.maxheight
 		);
 	}
 }
@@ -209,7 +219,7 @@ class GalleryWidget extends WidgetType {
 
 		for (const item of this.items) {
 			div.appendChild(buildGalleryItemElement(
-				{ src: item.resolvedSrc, alt: item.alt, caption: item.caption },
+				{ src: item.resolvedSrc, alt: item.alt, caption: item.caption, maxheight: '' },
 				item.resolvedSrc,
 			));
 		}

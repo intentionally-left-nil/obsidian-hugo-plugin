@@ -119,6 +119,7 @@ function buildImageEntries(
 			file: adapter.resolveImageFile(post, cover.src),
 			alt: cover.alt ?? '',
 			caption: cover.caption ?? '',
+			maxheight: '',
 			isCover: true,
 		};
 		referenced.push(coverEntry);
@@ -148,18 +149,19 @@ function buildImageEntries(
 					} else if (coverEntry.source.kind === 'figure-cover') {
 						coverEntry.source.nodeIndexes.push(figureIndex);
 					}
-				} else {
-					// No frontmatter cover; synthesise one from this node's args.
-					const src = node.args.named.get('src')?.value ?? '';
-					const entry: ReferencedImageEntry = {
-						kind: 'referenced',
-						source: { kind: 'figure-cover', nodeIndexes: [figureIndex] },
-						src,
-						file: src ? adapter.resolveImageFile(post, src) : null,
-						alt: node.args.named.get('alt')?.value ?? '',
-						caption: node.args.named.get('caption')?.value ?? '',
-						isCover: true,
-					};
+			} else {
+				// No frontmatter cover; synthesise one from this node's args.
+				const src = node.args.named.get('src')?.value ?? '';
+				const entry: ReferencedImageEntry = {
+					kind: 'referenced',
+					source: { kind: 'figure-cover', nodeIndexes: [figureIndex] },
+					src,
+					file: src ? adapter.resolveImageFile(post, src) : null,
+					alt: node.args.named.get('alt')?.value ?? '',
+					caption: node.args.named.get('caption')?.value ?? '',
+					maxheight: '',
+					isCover: true,
+				};
 					referenced.push(entry);
 					coverEntry = entry;
 					if (entry.file) referencedFiles.add(entry.file);
@@ -177,6 +179,7 @@ function buildImageEntries(
 					file: adapter.resolveImageFile(post, src),
 					alt: node.args.named.get('alt')?.value ?? '',
 					caption: node.args.named.get('caption')?.value ?? '',
+					maxheight: node.args.named.get('maxheight')?.value ?? '',
 					isCover: false,
 				};
 				referenced.push(entry);
@@ -204,6 +207,7 @@ function buildImageEntries(
 					file: adapter.resolveImageFile(post, src),
 					alt: child.args.named.get('alt')?.value ?? '',
 					caption: child.args.named.get('caption')?.value ?? '',
+					maxheight: '',
 					isCover: false,
 				};
 				referenced.push(entry);
@@ -308,7 +312,7 @@ export function findFigureCoverNodes(ast: AstNode[]): ShortcodeNode[] {
 export function setShortcodeArgs(
 	body: string,
 	node: ShortcodeNode,
-	updates: Partial<{ alt: string; caption: string; src: string }>,
+	updates: Partial<{ alt: string; caption: string; src: string; maxheight: string }>,
 ): string {
 	const mutate = (args: ShortcodeNode['args']) => {
 		if (updates.alt !== undefined) {
@@ -322,6 +326,10 @@ export function setShortcodeArgs(
 		if (updates.src !== undefined) {
 			if (updates.src === '') args.named.delete('src');
 			else args.named.set('src', { value: updates.src });
+		}
+		if (updates.maxheight !== undefined) {
+			if (updates.maxheight === '') args.named.delete('maxheight');
+			else args.named.set('maxheight', { value: updates.maxheight });
 		}
 	};
 	const newArgs: ShortcodeNode['args'] = {

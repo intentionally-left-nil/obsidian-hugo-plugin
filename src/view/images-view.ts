@@ -268,6 +268,9 @@ export class HugoImagesView extends ItemView {
 			onCaptionChanged: (entry: ReferencedImageEntry, value: string) => {
 				void this.handleAltOrCaptionChange(entry, 'caption', value);
 			},
+			onMaxHeightChanged: (entry: ReferencedImageEntry, value: string) => {
+				void this.handleMaxHeightChange(entry, value);
+			},
 			onCoverChanged: (entry: ReferencedImageEntry, isCover: boolean) => {
 				void this.handleCoverChange(entry, isCover);
 			},
@@ -307,6 +310,31 @@ export class HugoImagesView extends ItemView {
 				const split = splitFrontmatter(raw);
 				try {
 					const newBody = setShortcodeArgs(split.body, node, { [field]: value });
+					return raw.slice(0, split.bodyStart) + newBody;
+				} catch {
+					new Notice('Edit failed — file unchanged');
+					return raw;
+				}
+			});
+		});
+	}
+
+	private async handleMaxHeightChange(
+		entry: ReferencedImageEntry,
+		value: string,
+	): Promise<void> {
+		if (!this.postFile || !this.parsed) return;
+		// maxheight is a shortcode arg; only figure and figure-cover entries have a node.
+		if (entry.source.kind !== 'figure' && entry.source.kind !== 'figure-cover') return;
+		const node = findShortcodeForEntry(this.parsed.ast, entry);
+		if (!node) return;
+		// Normalise: strip non-digit characters, accept empty to clear the arg.
+		const cleaned = value.replace(/\D/g, '');
+		await this.runWrite(async () => {
+			await this.adapter.processBody(this.postFile!, (raw) => {
+				const split = splitFrontmatter(raw);
+				try {
+					const newBody = setShortcodeArgs(split.body, node, { maxheight: cleaned });
 					return raw.slice(0, split.bodyStart) + newBody;
 				} catch {
 					new Notice('Edit failed — file unchanged');

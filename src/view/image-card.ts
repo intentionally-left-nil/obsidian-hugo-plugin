@@ -6,6 +6,7 @@ import { isExternalUrl, isInsidePostBundle } from '../utils/paths';
 export interface ImageCardCallbacks {
 	onAltChanged(entry: ReferencedImageEntry, value: string): void;
 	onCaptionChanged(entry: ReferencedImageEntry, value: string): void;
+	onMaxHeightChanged(entry: ReferencedImageEntry, value: string): void;
 	onCoverChanged(entry: ReferencedImageEntry, isCover: boolean): void;
 	onInsert(entry: UnreferencedImageEntry): void;
 	onDelete(entry: ImageEntry): void;
@@ -96,6 +97,20 @@ function renderReferencedFields(
 	captionInput.value = entry.caption;
 	registerExpandingTextarea(captionInput);
 	registerDebouncedTextarea(captionInput, (value) => callbacks.onCaptionChanged(entry, value));
+
+	// Max height — only for shortcode-backed figure entries (not cover-only or gallery-item).
+	const src = entry.source;
+	if (src.kind === 'figure' || src.kind === 'figure-cover') {
+		const maxhRow = fields.createDiv({ cls: 'hugo-image-input-row' });
+		maxhRow.createEl('span', { cls: 'hugo-image-input-label', text: 'H', attr: { title: 'Max height (px)' } });
+		const maxhInput = maxhRow.createEl('input', {
+			type: 'text',
+			cls: 'hugo-image-maxheight-input',
+			attr: { placeholder: 'Max height (px)', inputmode: 'numeric', pattern: '[0-9]*' },
+		});
+		maxhInput.value = entry.maxheight;
+		registerDebouncedInput(maxhInput, (value) => callbacks.onMaxHeightChanged(entry, value));
+	}
 
 	const coverRow = fields.createDiv({ cls: 'hugo-image-cover-row' });
 	const coverCheckbox = coverRow.createEl('input', { type: 'checkbox' });

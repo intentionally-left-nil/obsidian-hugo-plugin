@@ -248,7 +248,14 @@
 	line-height: 1.4;
 }
 
-.hugo-image-cover-row {
+.hugo-image-maxheight-input {
+	flex: 1;
+	min-width: 0;
+	font-size: var(--font-ui-small);
+	font-family: inherit;
+}
+
+
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;

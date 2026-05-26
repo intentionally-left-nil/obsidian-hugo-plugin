@@ -221,6 +221,27 @@ describe('readPost', () => {
 		expect(referenced[0]!.source.kind).toBe('figure-cover');
 		expect(referenced[1]!.isCover).toBe(false);
 	});
+
+	it('reads maxheight from a standalone figure shortcode', async () => {
+		const post = await loadPost({
+			postPath: 'blog/p/index.md',
+			rawContent: '{{< figure src="images/a.png" maxheight="300" />}}',
+			imageFiles: ['blog/p/images/a.png'],
+		});
+		const entry = post.images[0] as ReferencedImageEntry;
+		expect(entry.source.kind).toBe('figure');
+		expect(entry.maxheight).toBe('300');
+	});
+
+	it('sets maxheight to empty string when arg is absent', async () => {
+		const post = await loadPost({
+			postPath: 'blog/p/index.md',
+			rawContent: '{{< figure src="images/a.png" />}}',
+			imageFiles: ['blog/p/images/a.png'],
+		});
+		const entry = post.images[0] as ReferencedImageEntry;
+		expect(entry.maxheight).toBe('');
+	});
 });
 
 describe('setShortcodeArgs', () => {
@@ -246,6 +267,20 @@ describe('setShortcodeArgs', () => {
 		const second = ast.filter((n): n is ShortcodeNode => n.kind === 'shortcode')[1]!;
 		const out = setShortcodeArgs(body, second, { alt: 'b alt' });
 		expect(out).toBe('{{< figure src="a.png" />}} {{< figure src="b.png" alt="b alt" />}}');
+	});
+
+	it('sets maxheight on a figure', () => {
+		const body = '{{< figure src="a.png" />}}';
+		const node = parse(body)[0] as ShortcodeNode;
+		const out = setShortcodeArgs(body, node, { maxheight: '400' });
+		expect(out).toBe('{{< figure src="a.png" maxheight="400" />}}');
+	});
+
+	it('clears maxheight when set to empty string', () => {
+		const body = '{{< figure src="a.png" maxheight="400" />}}';
+		const node = parse(body)[0] as ShortcodeNode;
+		const out = setShortcodeArgs(body, node, { maxheight: '' });
+		expect(out).toBe('{{< figure src="a.png" />}}');
 	});
 });
 
@@ -434,6 +469,7 @@ describe('removeShortcodeFromBody', () => {
 			file: null,
 			alt: '',
 			caption: '',
+			maxheight: '',
 			isCover: false,
 			...extra,
 		};
@@ -447,6 +483,7 @@ describe('removeShortcodeFromBody', () => {
 			file: null,
 			alt: '',
 			caption: '',
+			maxheight: '',
 			isCover: true,
 		};
 	}
@@ -459,6 +496,7 @@ describe('removeShortcodeFromBody', () => {
 			file: null,
 			alt: '',
 			caption: '',
+			maxheight: '',
 			isCover: false,
 		};
 	}
@@ -471,6 +509,7 @@ describe('removeShortcodeFromBody', () => {
 			file: null,
 			alt: '',
 			caption: '',
+			maxheight: '',
 			isCover: true,
 		};
 	}

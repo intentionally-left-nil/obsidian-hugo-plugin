@@ -76,6 +76,7 @@ export interface ReferencedImageEntry {
 	file: TFile | null;
 	alt: string;
 	caption: string;
+	maxheight: string;
 	isCover: boolean;
 }
 
